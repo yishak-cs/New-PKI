@@ -70,18 +70,10 @@ func (ca *CAuthority) IssueCertificate(ctx context.Context, req *pb.CertificateR
 	// base 64 encoding of the signature
 	signatureBase64 := base64.StdEncoding.EncodeToString(signature)
 
-	//
-	publicKeyDer := x509.MarshalPKCS1PublicKey(publicKey)
-
-	pub := pem.EncodeToMemory(&pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: publicKeyDer,
-	})
-
 	resp := pb.CertficateResponse{
 		SubjectName:      req.CommonName,
 		CertSerialNumber: req.SerialNumber,
-		PubKey:           string(pub),
+		PubKey:           req.PublicKey,
 		Issuer:           "CERTIFICATE AUTHORITY b**ch",
 		Signature:        signatureBase64,
 	}
