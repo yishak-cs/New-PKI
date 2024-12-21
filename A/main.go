@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -17,7 +18,9 @@ import (
 
 	pb "github.com/yishak-cs/New-PKIcls/protogen"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 type PartyAServices struct {
@@ -32,6 +35,12 @@ func (a *PartyAServices) SendCertificate(ctx context.Context, empty *pb.Empty) (
 	// cryptocratic number generation for the serialNumber of the Cert
 	max := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, _ := rand.Int(rand.Reader, max)
+
+	select {
+	case <-ctx.Done():
+		return nil, status.Errorf(codes.Canceled, "request canceled")
+	default:
+	}
 
 	// seriallize the A's public key to []byte
 	publicKeyDER := x509.MarshalPKCS1PublicKey(aPublicKey)
@@ -118,7 +127,9 @@ func (a *PartyAServices) VerifyCertificate(ctx context.Context, resp *pb.Certfic
 	buffer.WriteString(resp.PubKey)
 	hash := sha256.Sum256(buffer.Bytes())
 
-	problem := rsa.VerifyPKCS1v15(key, crypto.SHA256, hash[:], []byte(resp.Signature))
+	caSign, _ := base64.StdEncoding.DecodeString(resp.Signature)
+
+	problem := rsa.VerifyPKCS1v15(key, crypto.SHA256, hash[:], caSign)
 
 	if problem != nil {
 		return nil, fmt.Errorf("failed to verify certificate: %v", problem)
