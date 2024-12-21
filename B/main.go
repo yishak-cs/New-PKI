@@ -14,7 +14,6 @@ import (
 	"log"
 	"math/big"
 	"net"
-	"time"
 
 	pb "github.com/yishak-cs/New-PKIcls/protogen"
 	"google.golang.org/grpc"
@@ -24,7 +23,7 @@ import (
 )
 
 type PartyBServices struct {
-	pb.UnimplementedPartyAServiceServer
+	pb.UnimplementedPartyBServiceServer
 }
 
 // party B private and public keys
@@ -152,42 +151,11 @@ func main() {
 	}
 
 	server := grpc.NewServer()
-	pb.RegisterPartyAServiceServer(server, &PartyBServices{})
+	pb.RegisterPartyBServiceServer(server, &PartyBServices{})
 
-	log.Println("A's Service is running on port 50050...")
+	log.Println("B's Service is running on port 50050...")
 	if err := server.Serve(conn); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
 	}
 
-	go func() {
-		// get new grpc client to connect with A
-		bClient, err := grpc.NewClient("localhost:50000", grpc.WithTransportCredentials(insecure.NewCredentials()))
-
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer bClient.Close()
-		// use the grpc client to connect with A's server and obtain A's service client
-		client := pb.NewPartyAServiceClient(bClient)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		// use A's client(stub) to invoke SendCertificate method
-		cert, err := client.SendCertificate(ctx, &pb.Empty{})
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		//create an instance of party A
-		a := PartyBServices{}
-
-		_, prob := a.VerifyCertificate(ctx, cert)
-
-		if prob != nil {
-			log.Fatalf("failed to verify public key: %v", prob)
-		}
-		// verification is successful
-		log.Println("Public key verified successfully")
-		// send message here
-	}()
 }

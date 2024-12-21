@@ -171,16 +171,16 @@ func main() {
 
 		for retries := 0; retries < 3; retries++ {
 			// get new grpc client to connect with B
-			aClient, err := grpc.NewClient("localhost:50000", grpc.WithTransportCredentials(insecure.NewCredentials()))
+			bClient, err := grpc.NewClient("localhost:50050", grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 			if err != nil {
-				log.Printf("Attempt %d: Failed to connect to Party A: %v", retries+1, err)
+				log.Printf("Attempt %d: Failed to connect to Party B: %v", retries+1, err)
 				time.Sleep(2 * time.Second)
 				continue
 			}
-			defer aClient.Close()
+			defer bClient.Close()
 			// use the grpc client to connect with B's server and obtain B's service client
-			client := pb.NewPartyAServiceClient(aClient)
+			client := pb.NewPartyBServiceClient(bClient)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -192,9 +192,9 @@ func main() {
 			}
 
 			//create an instance of party A
-			b := PartyAServices{}
+			a := PartyAServices{}
 
-			_, prob := b.VerifyCertificate(ctx, cert)
+			_, prob := a.VerifyCertificate(ctx, cert)
 
 			if prob != nil {
 				errors <- fmt.Errorf("failed to verify public key: %v", prob)
@@ -211,7 +211,7 @@ func main() {
 	}()
 
 	go func() {
-		conn, err := net.Listen("tcp", "localhost:50050")
+		conn, err := net.Listen("tcp", "localhost:50000")
 
 		if err != nil {
 			errors <- fmt.Errorf("failed to listen: %v", err)
@@ -221,7 +221,7 @@ func main() {
 		server := grpc.NewServer()
 		pb.RegisterPartyAServiceServer(server, &PartyAServices{})
 
-		log.Println("B's Service is running on port 50000...")
+		log.Println("A's Service is running on port 50000...")
 		if err := server.Serve(conn); err != nil {
 			errors <- fmt.Errorf("failed to serve: %v", err)
 			return
