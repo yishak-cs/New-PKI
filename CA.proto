@@ -22,9 +22,24 @@ message CAPublicKey{
 
 message Empty{}
 
-message Data{
-    string data = 10;
+message InitialMessage {
+    string encrypted_session_key = 10;
+    string encrypted_message = 11;
+    CertficateResponse sender_certificate = 12;
+    string nonce=13;
 }
+
+message SubsequentMessage {
+    string encrypted_message = 14;
+}
+
+message Data {
+    oneof payload {
+        InitialMessage initial_message = 15;
+        SubsequentMessage subsequent_message = 16;
+    }
+}
+
 
 service CAService {
     rpc IssueCertificate(CertificateRequest) returns (CertficateResponse);
@@ -34,10 +49,11 @@ service CAService {
 service PartyAService {
     rpc SendCertificate(Empty) returns (CertficateResponse);
     rpc verifyCertificate(CertficateResponse) returns (Empty);
-    rpc SendMessage(Data) returns (Empty);
+    rpc ReceiveMessage(Data) returns (Empty);
 }
 
 service PartyBService {
     rpc SendCertificate(Empty) returns (CertficateResponse);
     rpc verifyCertificate(CertficateResponse) returns (Empty);
+    rpc ReceiveMessage(Data) returns (Empty);
 }

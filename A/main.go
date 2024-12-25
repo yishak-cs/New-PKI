@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -28,8 +31,12 @@ import (
 )
 
 type PartyAServices struct {
+	SessionKey []byte
 	pb.UnimplementedPartyAServiceServer
 }
+
+const secrete string = "This%is%A%demo%of%Public%key%inf"
+const nonce = "64a9433eae7ccceee2fc0eda"
 
 // party A private and public keys
 var aPrivateKey, _ = rsa.GenerateKey(rand.Reader, 2048)
@@ -80,15 +87,52 @@ func (a *PartyAServices) SendCertificate(ctx context.Context, empty *pb.Empty) (
 		return nil, fmt.Errorf("failed to obtain certificate: %v", err)
 	}
 
-	log.Println(Cert.Signature)
 	return Cert, nil
 }
 
-func (a *PartyAServices) SendMessage(ctx context.Context, d *pb.Data) (*pb.Empty, error) {
-	return nil, nil
-	//
-	//
-	//
+func (a *PartyAServices) ReceiveMessage(ctx context.Context, d *pb.Data) (*pb.Empty, error) {
+
+	if a.SessionKey == nil && d.GetSubsequentMessage() != nil {
+		return nil, fmt.Errorf("session key has not been established")
+	}
+
+	switch data := d.Payload.(type) {
+
+	case *pb.Data_SubsequentMessage:
+		// Decrypt message using stored session key
+		message, err := a.decryptMessage([]byte(data.SubsequentMessage.EncryptedMessage), nonce)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt message: %v", err)
+		}
+
+		fmt.Printf("\tParty B said: \t %s", string(message))
+
+		return &pb.Empty{}, nil
+
+	default:
+		return nil, fmt.Errorf("something went wrong")
+	}
+}
+
+func (a *PartyAServices) decryptMessage(ciphertext []byte, numOnce string) ([]byte, error) {
+	block, err := aes.NewCipher(a.SessionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %v", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %v", err)
+	}
+	nonce, _ := hex.DecodeString(numOnce)
+
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %v", err)
+	}
+	return plaintext, nil
 }
 
 func (a *PartyAServices) VerifyCertificate(ctx context.Context, resp *pb.CertficateResponse) (*pb.Empty, error) {
@@ -149,6 +193,62 @@ func (a *PartyAServices) VerifyCertificate(ctx context.Context, resp *pb.Certfic
 	return &pb.Empty{}, nil
 }
 
+func prepareData(publicKey string, plaintext string) (*pb.Data, error) {
+	// Generate AES cipher with session key
+	block, err := aes.NewCipher([]byte(secrete))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	numOnce, _ := hex.DecodeString(nonce)
+
+	ciphertext := gcm.Seal(nil, numOnce, []byte(plaintext), nil)
+
+	// Decode and parse public key
+
+	bPubKeyBlock, _ := pem.Decode([]byte(publicKey))
+	if bPubKeyBlock == nil {
+		return nil, fmt.Errorf("failed to decode PEM block")
+	}
+
+	key, err := x509.ParsePKCS1PublicKey(bPubKeyBlock.Bytes)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse public key: %w", err)
+	}
+
+	// Get certificate
+	a := PartyAServices{}
+	cert, err := a.SendCertificate(context.Background(), &pb.Empty{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get certificate: %w", err)
+	}
+
+	// Encrypt session key
+	encryptedSessionKey, err := rsa.EncryptPKCS1v15(rand.Reader, key, []byte(secrete))
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt session key: %w", err)
+	}
+	eMessage := base64.StdEncoding.EncodeToString(ciphertext)
+	eSessionKey := base64.StdEncoding.EncodeToString(encryptedSessionKey)
+	// Create protobuf message
+	return &pb.Data{
+		Payload: &pb.Data_InitialMessage{
+			InitialMessage: &pb.InitialMessage{
+				EncryptedMessage:    eMessage,
+				EncryptedSessionKey: eSessionKey,
+				SenderCertificate:   cert,
+				Nonce:               nonce,
+			},
+		},
+	}, nil
+}
+
 func main() {
 	// wait groun so the main routine doesnt exit before
 	// routines it created exit.
@@ -182,15 +282,15 @@ func main() {
 			// use the grpc client to connect with B's server and obtain B's service client
 			client := pb.NewPartyBServiceClient(bClient)
 
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
+			ctx := context.Background()
+
 			// use B's client(stub) to invoke SendCertificate method
 			cert, err := client.SendCertificate(ctx, &pb.Empty{})
 			if err != nil {
 				log.Printf("Failed to get certificate: %v", err)
 				continue
 			}
-
+			// cert now has B's certificate which has the B's public key and CA signature of the CSR data,
 			//create an instance of party A
 			a := PartyAServices{}
 
@@ -202,9 +302,20 @@ func main() {
 			}
 			// verification is successful
 			log.Println("Public key verified successfully")
-			// process the message sent
-			//
-			//
+
+			// send message ///////////////
+			// use B's public key from the certificate received from calling B's SendCertificate
+			data, err := prepareData(cert.PubKey, "Hey Man it's A. How are you doing")
+
+			if err != nil {
+				log.Printf("failed to prepare the data B: %v", err)
+			}
+			_, err = client.ReceiveMessage(ctx, data)
+			if err != nil {
+				log.Println(err)
+			}
+
+			/////////////////////////
 			return
 		}
 		errors <- fmt.Errorf("failed to establish connection after 3 retries")

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -23,8 +26,11 @@ import (
 )
 
 type PartyBServices struct {
+	SessionKey []byte
 	pb.UnimplementedPartyBServiceServer
 }
+
+var numberOnce string
 
 // party B private and public keys
 var bPrivateKey, _ = rsa.GenerateKey(rand.Reader, 2048)
@@ -75,15 +81,85 @@ func (a *PartyBServices) SendCertificate(ctx context.Context, empty *pb.Empty) (
 		return nil, fmt.Errorf("failed to obtain certificate: %v", err)
 	}
 
-	log.Println(Cert.Signature)
 	return Cert, nil
 }
 
-func (a *PartyBServices) SendMessage(ctx context.Context, d *pb.Data) (*pb.Empty, error) {
-	return nil, nil
-	//
-	//
-	//
+func (b *PartyBServices) ReceiveMessage(ctx context.Context, d *pb.Data) (*pb.Empty, error) {
+
+	if b.SessionKey == nil && d.GetSubsequentMessage() != nil {
+		return nil, fmt.Errorf("session key has not been established")
+	}
+
+	switch data := d.Payload.(type) {
+
+	case *pb.Data_InitialMessage:
+		if _, err := b.VerifyCertificate(ctx, data.InitialMessage.SenderCertificate); err != nil {
+			return nil, fmt.Errorf("something went wrong")
+		}
+		log.Println("A's Certificate verified successfully")
+		eSessionKey, prob := base64.StdEncoding.DecodeString(data.InitialMessage.EncryptedSessionKey)
+		if prob != nil {
+			return nil, fmt.Errorf("%v", prob)
+		}
+
+		var err error
+		b.SessionKey, err = rsa.DecryptPKCS1v15(rand.Reader, bPrivateKey, eSessionKey)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt the session key: %v", err)
+		}
+		log.Printf("\t The Session Key:\n %v \n \t#######", string(b.SessionKey))
+
+		eMessage, prob := base64.StdEncoding.DecodeString(data.InitialMessage.EncryptedMessage)
+		if prob != nil {
+			return nil, fmt.Errorf("%v", prob)
+		}
+
+		numberOnce = data.InitialMessage.Nonce
+
+		message, err := b.decryptMessage(eMessage, numberOnce)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt message: %v", err)
+		}
+
+		fmt.Printf("\t Party A said: \t %s", string(message))
+
+		return &pb.Empty{}, nil
+
+	case *pb.Data_SubsequentMessage:
+		// Decrypt message using stored session key
+		message, err := b.decryptMessage([]byte(data.SubsequentMessage.EncryptedMessage), numberOnce)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt message: %v", err)
+		}
+
+		fmt.Printf("\tParty A said: \t %s", string(message))
+		return &pb.Empty{}, nil
+
+	}
+	return nil, fmt.Errorf("something went wrong")
+}
+
+func (b *PartyBServices) decryptMessage(ciphertext []byte, numOnce string) ([]byte, error) {
+	block, err := aes.NewCipher(b.SessionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %v", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %v", err)
+	}
+	nonce, _ := hex.DecodeString(numOnce)
+
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %v", err)
+	}
+	return plaintext, nil
 }
 
 func (a *PartyBServices) VerifyCertificate(ctx context.Context, resp *pb.CertficateResponse) (*pb.Empty, error) {
