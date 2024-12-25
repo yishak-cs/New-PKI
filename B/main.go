@@ -108,7 +108,7 @@ func (b *PartyBServices) ReceiveMessage(ctx context.Context, d *pb.Data) (*pb.Em
 		if err != nil {
 			return nil, fmt.Errorf("failed to decrypt the session key: %v", err)
 		}
-		log.Printf("\t The Session Key:\n %v \n \t#######", string(b.SessionKey))
+		log.Printf("\n \t \tThe Session Key:\n \t %v \n \t \t#######", string(b.SessionKey))
 
 		eMessage, prob := base64.StdEncoding.DecodeString(data.InitialMessage.EncryptedMessage)
 		if prob != nil {
@@ -123,7 +123,7 @@ func (b *PartyBServices) ReceiveMessage(ctx context.Context, d *pb.Data) (*pb.Em
 			return nil, fmt.Errorf("failed to decrypt message: %v", err)
 		}
 
-		fmt.Printf("\t Party A said: \t %s", string(message))
+		fmt.Printf("\n \t Party A said: \t %s", string(message))
 
 		return &pb.Empty{}, nil
 

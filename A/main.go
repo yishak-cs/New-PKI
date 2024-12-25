@@ -305,7 +305,7 @@ func main() {
 
 			// send message ///////////////
 			// use B's public key from the certificate received from calling B's SendCertificate
-			data, err := prepareData(cert.PubKey, "Hey Man it's A. How are you doing")
+			data, err := prepareData(cert.PubKey, "Hey Man it's A. How are you doing?")
 
 			if err != nil {
 				log.Printf("failed to prepare the data B: %v", err)
