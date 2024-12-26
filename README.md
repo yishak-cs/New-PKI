@@ -50,12 +50,12 @@ This repository demonstrates a Public Key Infrastructure (PKI) communication sys
    go run CA/main.go
    ```
 
-2. Start Party B:
+2. Start Party B in a new terminal:
    ```bash
    go run B/main.go
    ```
 
-3. Start Party A:
+3. Start Party A in another terminal:
    ```bash
    go run A/main.go
    ```
